@@ -18,7 +18,7 @@ MODEL_NAME = "phi4-reasoning"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Input CSV file path
-INPUT_FILE = "hotels_reviews.csv"  # Change this to your actual file path
+INPUT_FILE = "retail_reviews.csv"  # Change this to your actual file path
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -283,14 +283,18 @@ def generate_review_with_ollama(prompt):
         logging.error(f"Unexpected error in generate_review_with_ollama: {e}")
         return None
 
-def generate_irrelevant_reviews(df):
-    """Generate irrelevant reviews for each company using Ollama."""
+def generate_irrelevant_reviews(df, output_filename):
+    """Generate irrelevant reviews for each company, saving progress every 10 reviews."""
     print("\nGenerating irrelevant reviews with Ollama...")
     
     # Group by company
     company_groups = df.groupby('company_name')
     all_irrelevant_reviews = []
+    reviews_batch = [] # To hold reviews for periodic saving
     
+    # Check if the output file exists to decide whether to write headers
+    write_header = not os.path.exists(output_filename)
+
     total_companies = len(company_groups)
     num_policies = len(VIOLATION_TYPES)
     
@@ -299,59 +303,67 @@ def generate_irrelevant_reviews(df):
         total_reviews_for_company = len(company_data)
         reviews_per_policy = math.ceil(total_reviews_for_company / 2 / num_policies)
         
-        # Skip if calculation results in 0 reviews
         if reviews_per_policy == 0:
-            print(f"\nSkipping {company_name}: only {total_reviews_for_company} reviews, would generate 0 per policy")
+            logging.info(f"Skipping {company_name}: only {total_reviews_for_company} reviews, would generate 0 per policy")
             continue
             
         print(f"\n{company_name}: {total_reviews_for_company} original reviews → {reviews_per_policy} per policy ({reviews_per_policy * num_policies} total)")
         
-        # Get company info
         company_category = company_data['category'].iloc[0]
-        company_group = company_data['group'].iloc[0]  # Get the original group value
+        company_group = company_data['group'].iloc[0]
         sample_reviews = company_data['text'].head(3).tolist()
         existing_reviews_sample = "\n".join([f"- {review[:100]}..." for review in sample_reviews])
         
-        # Generate reviews for each violation type
         for violation_type in VIOLATION_TYPES.keys():
             for _ in range(reviews_per_policy):
                 try:
-                    # Create prompt
                     prompt = create_prompt(company_name, company_category, violation_type, existing_reviews_sample)
-                    
-                    # Generate review using Ollama
                     generated_data = generate_review_with_ollama(prompt)
                     
                     if generated_data is None:
                         print(f"Failed to generate review for {company_name} ({violation_type})")
                         continue
                     
-                    # Create review record
                     irrelevant_review = {
                         'company_name': company_name,
                         'reviewer_name': generate_fake_reviewer_name(),
                         'review_date': generate_fake_date(),
                         'text': generated_data['review_text'],
-                        'stars': generated_data['star_rating'],  # Use AI-generated star rating
+                        'stars': generated_data['star_rating'],
                         'category': company_category,
-                        'image_urls': '',  # Empty for generated reviews
-                        'image_captions': '',  # Empty for generated reviews
-                        'group': company_group,  # Use the same group as original company data
-                        'irrelevant': True,  # Boolean flag for irrelevant reviews
-                        'violation_type': violation_type  # Track which policy was violated
+                        'image_urls': '',
+                        'image_captions': '',
+                        'group': company_group,
+                        'irrelevant': True,
+                        'violation_type': violation_type
                     }
                     
                     all_irrelevant_reviews.append(irrelevant_review)
+                    reviews_batch.append(irrelevant_review)
                     
-                    # Small delay to avoid overwhelming Ollama
+                    # --- MODIFIED: Save in batches of 10 ---
+                    if len(reviews_batch) >= 10:
+                        batch_df = pd.DataFrame(reviews_batch)
+                        batch_df.to_csv(output_filename, mode='a', header=write_header, index=False)
+                        print(f"   ... Saved batch of {len(reviews_batch)} reviews to '{output_filename}'")
+                        reviews_batch.clear() # Clear the batch
+                        write_header = False # Ensure header is not written again
+                    
                     time.sleep(0.2)
                     
                 except Exception as e:
                     print(f"\nERROR generating review for {company_name} ({violation_type}): {e}")
                     logging.error(f"Error generating review for {company_name} ({violation_type}): {e}")
                     continue
+
+    # --- MODIFIED: Save any remaining reviews in the last batch ---
+    if reviews_batch:
+        batch_df = pd.DataFrame(reviews_batch)
+        batch_df.to_csv(output_filename, mode='a', header=write_header, index=False)
+        print(f"   ... Saved final batch of {len(reviews_batch)} reviews to '{output_filename}'")
+        reviews_batch.clear()
     
-    print(f"\nGenerated {len(all_irrelevant_reviews)} irrelevant reviews using Ollama")
+    print(f"\nGenerated a total of {len(all_irrelevant_reviews)} irrelevant reviews in this session.")
     return all_irrelevant_reviews
 
 def main():
@@ -359,42 +371,39 @@ def main():
     if not setup():
         return
     
-    # Load dataset
     df = load_dataset()
     if df is None:
         return
     
-    # Generate irrelevant reviews using Ollama
-    irrelevant_reviews = generate_irrelevant_reviews(df)
+    # --- MODIFIED: Define output filename early ---
+    input_basename = os.path.splitext(os.path.basename(INPUT_FILE))[0]
+    output_filename = f"{input_basename}_irrelevant.csv"
     
-    if not irrelevant_reviews:
-        print("No irrelevant reviews were generated. Exiting.")
+    # Generate irrelevant reviews using Ollama and save them progressively
+    irrelevant_reviews_this_session = generate_irrelevant_reviews(df, output_filename)
+    
+    if not irrelevant_reviews_this_session:
+        print("No irrelevant reviews were generated in this session. Exiting.")
         return
     
-    # Save results
+    # --- MODIFIED: The saving logic is now inside the generation function.
+    # We only create a dataframe here for the final summary statistics.
     try:
-        irrelevant_df = pd.DataFrame(irrelevant_reviews)
+        irrelevant_df = pd.DataFrame(irrelevant_reviews_this_session)
         
-        # Create output filename
-        input_basename = os.path.splitext(os.path.basename(INPUT_FILE))[0]
-        output_filename = f"{input_basename}_irrelevant.csv"
+        print(f"\n✅ Successfully generated and appended {len(irrelevant_reviews_this_session)} reviews to '{output_filename}'")
         
-        irrelevant_df.to_csv(output_filename, index=False)
-        
-        print(f"\n✅ Successfully saved {len(irrelevant_reviews)} irrelevant reviews to '{output_filename}'")
-        
-        # Print summary statistics
-        print("\n--- Generation Summary ---")
+        # Print summary statistics for this session
+        print("\n--- Generation Summary (This Session) ---")
         for violation_type in VIOLATION_TYPES.keys():
             count = len(irrelevant_df[irrelevant_df['violation_type'] == violation_type])
             print(f"{violation_type.replace('_', ' ').title()}: {count} reviews")
         
-        # Print model info
         print(f"\nGenerated using Ollama model: {MODEL_NAME}")
         
     except Exception as e:
-        print(f"\nERROR: Could not save the CSV file. Error: {e}")
-        logging.error(f"Error saving CSV file: {e}")
+        print(f"\nERROR: An error occurred during the summary phase. Error: {e}")
+        logging.error(f"Error during summary phase: {e}")
 
 if __name__ == "__main__":
     main()
