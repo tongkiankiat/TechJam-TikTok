@@ -20,3 +20,21 @@ With NoiseGuard, users get clearer insights, businesses enjoy fairer representat
 cd model
 ```
 - Edit the sample review and run the cell to generate an inference
+```python
+# Model: mDeBERTa-v3-base
+# Load model directly
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import torch, re, joblib
+import numpy as np
+from huggingface_hub import hf_hub_download
+from scipy.sparse import csr_matrix, hstack
+
+# TODO: Add the review to test here
+sample = {
+  "company_name": "McDonald's",
+  "review_date": "2025-08-29",
+  "text": "The new Spicy Tomato McChicken Set is wonderful for my wallet. The potato pops also go really well with it.",
+  "stars": 5,
+  "category": "food and beverages"
+}
+```
