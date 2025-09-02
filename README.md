@@ -8,6 +8,13 @@ Online reviews directly influence how people choose restaurants, shops, and serv
 
 With NoiseGuard, users get clearer insights, businesses enjoy fairer representation, and platforms reduce the manual burden of moderation while strengthening credibility.
 
+## Training Results
+### Model Training Results
+![alt_text](https://github.com/tongkiankiat/TechJam-TikTok/blob/main/images/model-trained-results.jpeg)
+
+### TF-IDF Trained Results
+![alt_text](https://github.com/tongkiankiat/TechJam-TikTok/blob/main/images/tf-idf-results.png)
+
 ## Setup
 - Install all dependencies
 ```bash
